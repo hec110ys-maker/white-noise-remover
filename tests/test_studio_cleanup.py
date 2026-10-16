@@ -1,6 +1,6 @@
 import numpy as np
 from core.denoise.base import BaseDenoiser, apply_studio_cleanup
-from core.denoise.deepfilter import DeepFilterDenoiser
+from core.denoise.spectral import SpectralGatingDenoiser
 
 
 def test_intelligent_voice_protection_no_silence_leak():
@@ -12,7 +12,8 @@ def test_intelligent_voice_protection_no_silence_leak():
     # White noise signal
     noisy = (np.random.randn(N, 1) * 0.1).astype(np.float32)
 
-    denoiser = DeepFilterDenoiser(strength=1.0, voice_protection=0.5, enable_studio_cleanup=False)
+    # Blending lives in BaseDenoiser; use a torch-free engine so this runs in the Windows lite build
+    denoiser = SpectralGatingDenoiser(strength=1.0, voice_protection=0.5, enable_studio_cleanup=False)
     # Apply blending
     result = denoiser.apply_strength_and_protection(clean, noisy, sr)
 
