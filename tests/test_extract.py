@@ -26,7 +26,7 @@ def create_synthetic_test_video(output_mp4: Path, duration_sec: float = 6.0) -> 
         "-i", f"testsrc=duration={duration_sec}:size=1920x1080:rate=30",
         "-f", "lavfi",
         "-i", f"sine=frequency=440:duration={duration_sec}:sample_rate=48000",
-        "-c:v", "libx264",
+        "-c:v", "mpeg4",  # built-in encoder: the bundled LGPL FFmpeg has no libx264
         "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-b:a", "192k",
