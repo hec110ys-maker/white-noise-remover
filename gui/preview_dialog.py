@@ -14,6 +14,7 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from core.probe import probe_media, get_ffmpeg_binary
 from utils.paths import SUBPROCESS_FLAGS
 import subprocess
+import tempfile
 from core.denoise.spectral import SpectralGatingDenoiser
 from core.denoise.rnnoise import RNNoiseDenoiser
 from core.vad import extract_noise_sample_from_file
@@ -59,8 +60,10 @@ class PreviewDialog(QDialog):
         self.player.setAudioOutput(self.audio_output)
         self.audio_output.setVolume(0.9)
 
-        self.orig_preview_wav = Path("/tmp/preview_orig.wav")
-        self.denoised_preview_wav = Path("/tmp/preview_denoised.wav")
+        # OS temp folder (on Windows /tmp does not exist)
+        self.preview_dir = Path(tempfile.mkdtemp(prefix="wnr_preview_"))
+        self.orig_preview_wav = self.preview_dir / "preview_orig.wav"
+        self.denoised_preview_wav = self.preview_dir / "preview_denoised.wav"
 
         self.init_ui()
 
@@ -130,6 +133,10 @@ class PreviewDialog(QDialog):
         self.status_lbl.setText("⏳ 선택 구간 오디오 추출 및 노이즈 제거 처리 중...")
         self.btn_generate.setEnabled(False)
 
+        # Release the wav files: Windows cannot overwrite a file the player still holds open
+        self.player.stop()
+        self.player.setSource(QUrl())
+
         ffmpeg = get_ffmpeg_binary()
         # 1. Extract 30 seconds slice
         cmd = [
@@ -137,13 +144,18 @@ class PreviewDialog(QDialog):
             "-ss", str(start_sec),
             "-t", "30",
             "-i", str(self.video_path),
+            "-vn",
             "-ar", "48000",
             "-c:a", "pcm_f32le",
             str(self.orig_preview_wav)
         ]
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **SUBPROCESS_FLAGS)
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                             encoding="utf-8", errors="replace", **SUBPROCESS_FLAGS)
         if res.returncode != 0:
-            QMessageBox.critical(self, "오류", "오디오 추출 실패")
+            # Show FFmpeg's last lines so the cause is visible instead of a bare failure message
+            detail = "\n".join(res.stderr.strip().splitlines()[-6:])
+            print(f"[preview] ffmpeg failed ({res.returncode}): {res.stderr}")
+            QMessageBox.critical(self, "오류", f"오디오 추출 실패\n\n{detail}")
             self.btn_generate.setEnabled(True)
             return
 
@@ -198,3 +210,11 @@ class PreviewDialog(QDialog):
     def closeEvent(self, event):
         self.player.stop()
         super().closeEvent(event)
+
+    def done(self, result):
+        # Runs for both the close button (accept) and the window X; remove the temp preview wavs
+        self.player.stop()
+        self.player.setSource(QUrl())
+        import shutil
+        shutil.rmtree(self.preview_dir, ignore_errors=True)
+        super().done(result)
