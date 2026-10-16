@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QDesktopServices
 
 from utils.device import get_optimal_device
+from core.denoise import deepfilter_available
 from utils.paths import get_output_video_path
 from core.probe import probe_media, MediaMetadata
 from gui.worker import DenoiseWorker
@@ -194,9 +195,10 @@ class MainWindow(QMainWindow):
         eng_row = QHBoxLayout()
         eng_row.addWidget(QLabel("제거 엔진 선택:"))
         self.combo_engine = QComboBox()
-        self.combo_engine.addItem("DeepFilterNet3 (1순위 권장 - AI 딥러닝 음성 향상)", "deepfilter")
-        self.combo_engine.addItem("noisereduce (2순위 - 스펙트럴 게이팅 초고속 CPU)", "spectral")
-        self.combo_engine.addItem("RNNoise (3순위 - 경량 순환신경망 RNN / 초경량 CPU)", "rnnoise")
+        if deepfilter_available():
+            self.combo_engine.addItem("DeepFilterNet3 (1순위 권장 - AI 딥러닝 음성 향상)", "deepfilter")
+        self.combo_engine.addItem("noisereduce (스펙트럴 게이팅 - 초고속 CPU)", "spectral")
+        self.combo_engine.addItem("RNNoise (경량 순환신경망 RNN - 초경량 CPU)", "rnnoise")
         eng_row.addWidget(self.combo_engine, stretch=1)
         settings_layout.addLayout(eng_row)
 

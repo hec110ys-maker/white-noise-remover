@@ -1,4 +1,4 @@
-# PyInstaller spec for the Windows build.
+# PyInstaller spec for the Windows build (lite: no AI / PyTorch, fully offline).
 # Build from the project root:  pyinstaller packaging/WhiteNoiseRemover.spec
 # Expects ffmpeg.exe / ffprobe.exe in packaging/ffmpeg/ (the CI workflow downloads them).
 import sys
@@ -9,7 +9,7 @@ ROOT = Path(SPECPATH).parent
 FFMPEG_DIR = ROOT / "packaging" / "ffmpeg"
 exe_suffix = ".exe" if sys.platform == "win32" else ""
 
-datas = [(str(ROOT / "models"), "models")]
+datas = [(str(ROOT / "models" / "bd.rnnn"), "models")]
 binaries = []
 for tool in ("ffmpeg", "ffprobe"):
     f = FFMPEG_DIR / f"{tool}{exe_suffix}"
@@ -17,7 +17,7 @@ for tool in ("ffmpeg", "ffprobe"):
         binaries.append((str(f), "bin"))
 
 hiddenimports = ["run_cli", "PySide6.QtMultimedia"]
-for pkg in ("df", "libdf", "noisereduce"):
+for pkg in ("noisereduce",):
     d, b, h = collect_all(pkg)
     datas += d
     binaries += b
@@ -31,6 +31,8 @@ a = Analysis(
     hiddenimports=hiddenimports,
     excludes=[
         "pytest", "tkinter", "IPython",
+        # AI engine is left out of the lite build
+        "torch", "torchaudio", "df", "libdf",
         "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.QtWebEngineQuick",
         "PySide6.Qt3DCore", "PySide6.QtQuick3D", "PySide6.QtPdf",
     ],

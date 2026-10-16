@@ -8,7 +8,6 @@ from PySide6.QtCore import QThread, Signal
 from core.probe import probe_media, compare_media_metadata
 from core.extract import extract_audio, remux_video_with_audio
 from core.chunker import AudioChunker
-from core.denoise.deepfilter import DeepFilterDenoiser
 from core.denoise.spectral import SpectralGatingDenoiser
 from core.denoise.rnnoise import RNNoiseDenoiser
 from core.vad import extract_noise_sample_from_file
@@ -27,7 +26,7 @@ class DenoiseWorker(QThread):
         self,
         input_video_path: str | Path,
         output_video_path: Optional[str | Path] = None,
-        engine_type: str = "deepfilter",
+        engine_type: str = "spectral",
         strength: float = 1.0,
         voice_protection: float = 0.3,
         enable_studio_cleanup: bool = True,
@@ -87,6 +86,7 @@ class DenoiseWorker(QThread):
                     enable_studio_cleanup=self.enable_studio_cleanup
                 )
             else:
+                from core.denoise.deepfilter import DeepFilterDenoiser
                 denoiser = DeepFilterDenoiser(
                     strength=self.strength,
                     voice_protection=self.voice_protection,
@@ -97,7 +97,7 @@ class DenoiseWorker(QThread):
                 return
 
             # Step 3: Stream Chunk Processing with Overlap-Add
-            self.status_changed.emit("⚡ 청크별 딥러닝 노이즈 제거 및 크로스페이드 재합성 중...")
+            self.status_changed.emit("⚡ 청크별 노이즈 제거 및 크로스페이드 재합성 중...")
             denoised_wav = temp_dir / "denoised_48k.wav"
             checkpoint_file = temp_dir / "checkpoint.json"
 

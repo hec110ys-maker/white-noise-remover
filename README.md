@@ -12,7 +12,8 @@
 3. 시작 메뉴나 바탕화면의 **화이트 노이즈 제거 프로그램**을 실행합니다.
 
 설치 없이 쓰려면 `WhiteNoiseRemover-Portable-x.y.z.zip`을 풀고 `WhiteNoiseRemover.exe`를 실행하면 됩니다.
-FFmpeg와 AI 모델(DeepFilterNet3, RNNoise)이 함께 들어 있어서 인터넷 연결 없이 동작합니다.
+Windows판은 AI(DeepFilterNet/PyTorch)를 뺀 경량판이라 **noisereduce**와 **RNNoise** 두 엔진만 들어 있습니다.
+FFmpeg가 포함되어 있어서 **인터넷이 없는 PC에서도 그대로 동작**합니다. 인터넷이 되는 PC에서 설치파일을 받아 USB로 옮겨 설치하면 됩니다.
 오류가 나면 `%LOCALAPPDATA%\WhiteNoiseRemover\crash.log`를 확인하세요.
 
 ### 새 버전 배포하기 (개발자용)

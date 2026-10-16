@@ -14,7 +14,6 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from core.probe import probe_media, get_ffmpeg_binary
 from utils.paths import SUBPROCESS_FLAGS
 import subprocess
-from core.denoise.deepfilter import DeepFilterDenoiser
 from core.denoise.spectral import SpectralGatingDenoiser
 from core.denoise.rnnoise import RNNoiseDenoiser
 from core.vad import extract_noise_sample_from_file
@@ -24,7 +23,7 @@ class PreviewDialog(QDialog):
     def __init__(
         self,
         video_path: str | Path,
-        engine_type: str = "deepfilter",
+        engine_type: str = "spectral",
         strength: float = 1.0,
         voice_protection: float = 0.3,
         enable_studio_cleanup: bool = True,
@@ -165,6 +164,7 @@ class PreviewDialog(QDialog):
                 enable_studio_cleanup=self.enable_studio_cleanup
             )
         else:
+            from core.denoise.deepfilter import DeepFilterDenoiser
             denoiser = DeepFilterDenoiser(
                 strength=self.strength,
                 voice_protection=self.voice_protection,

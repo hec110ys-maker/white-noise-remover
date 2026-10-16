@@ -11,7 +11,7 @@ from pathlib import Path
 from core.probe import probe_media, compare_media_metadata
 from core.extract import extract_audio, remux_video_with_audio
 from core.chunker import AudioChunker
-from core.denoise.deepfilter import DeepFilterDenoiser
+from core.denoise import available_engines
 from utils.paths import get_output_video_path, get_temp_work_dir, cleanup_temp_dir
 from utils.device import get_optimal_device
 
@@ -19,7 +19,7 @@ from utils.device import get_optimal_device
 def run_pipeline(
     input_video: str | Path,
     output_video: str | Path | None = None,
-    engine: str = "deepfilter",
+    engine: str = available_engines()[0],
     strength: float = 1.0,
     voice_protection: float = 0.3,
     enable_studio_cleanup: bool = True
@@ -34,7 +34,7 @@ def run_pipeline(
 
     device_info = get_optimal_device()
     print("=" * 60)
-    print("       화이트 노이즈 제거 프로그램 (DeepFilterNet 3.0 / Spectral)")
+    print("       화이트 노이즈 제거 프로그램")
     print("=" * 60)
     print(f"• 입력 영상    : {video_path.name}")
     print(f"• 출력 영상    : {out_path.name}")
@@ -85,6 +85,7 @@ def run_pipeline(
                 enable_studio_cleanup=enable_studio_cleanup
             )
         else:
+            from core.denoise.deepfilter import DeepFilterDenoiser
             denoiser = DeepFilterDenoiser(
                 strength=strength,
                 voice_protection=voice_protection,
@@ -149,7 +150,8 @@ def main():
     parser = argparse.ArgumentParser(description="동영상 화이트 노이즈 제거 프로그램")
     parser.add_argument("video_path", help="처리할 동영상 파일 경로 (MP4, MOV, MKV)")
     parser.add_argument("-o", "--output", help="출력 파일 경로 (기본값: 원본파일명_denoised.mp4)", default=None)
-    parser.add_argument("-e", "--engine", choices=["deepfilter", "spectral", "rnnoise"], default="deepfilter", help="제거 엔진 선택 (deepfilter, spectral, rnnoise, 기본값: deepfilter)")
+    engines = available_engines()
+    parser.add_argument("-e", "--engine", choices=engines, default=engines[0], help=f"제거 엔진 선택 ({', '.join(engines)}, 기본값: {engines[0]})")
     parser.add_argument("-s", "--strength", help="노이즈 제거 강도 (0.0 ~ 1.0, 기본값: 1.0)", type=float, default=1.0)
     parser.add_argument("-p", "--voice-protection", help="음성 보호 강도 (0.0 ~ 1.0, 기본값: 0.3)", type=float, default=0.3)
     parser.add_argument("--no-studio-cleanup", help="스튜디오 잔류 노이즈 정리기 비활성화", action="store_true")

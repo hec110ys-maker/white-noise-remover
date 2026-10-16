@@ -22,10 +22,9 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - name: Install dependencies (CPU-only PyTorch)
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
           pip install -r packaging/requirements-windows.txt
 
       - name: Download FFmpeg (LGPL build)
@@ -41,16 +40,16 @@ jobs:
         shell: pwsh
         run: |
           $env:PATH = "$PWD\packaging\ffmpeg;$env:PATH"
-          python -m pytest -q
+          python -m pytest -q --ignore=tests/test_deepfilter.py
 
       - name: Build exe (PyInstaller)
         run: pyinstaller --noconfirm packaging/WhiteNoiseRemover.spec
 
-      - name: Smoke test packaged exe (all 3 engines)
+      - name: Smoke test packaged exe (both engines)
         shell: pwsh
         run: |
           $exe = "dist\WhiteNoiseRemover\WhiteNoiseRemover.exe"
-          foreach ($engine in "rnnoise", "spectral", "deepfilter") {
+          foreach ($engine in "rnnoise", "spectral") {
             $out = "$PWD\smoke_$engine.mp4"
             $p = Start-Process $exe -ArgumentList "`"$PWD\sample_demo.mp4`"", "-e", $engine, "-o", "`"$out`"" -Wait -PassThru
             Get-Content "$env:LOCALAPPDATA\WhiteNoiseRemover\app.log" -ErrorAction SilentlyContinue
