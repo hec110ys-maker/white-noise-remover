@@ -1,0 +1,11 @@
+# Windows build dependencies (pinned to the versions verified on the dev Mac).
+# torch / torchaudio are installed separately from the CPU-only index (see workflow).
+numpy==1.26.4
+scipy==1.17.1
+soundfile==0.14.0
+PySide6==6.12.0
+matplotlib==3.11.2
+noisereduce==3.0.3
+deepfilternet==0.5.6
+pytest
+pyinstaller

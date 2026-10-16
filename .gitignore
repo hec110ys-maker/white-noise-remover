@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.temp_denoise/
+.DS_Store
+build/
+dist/
+packaging/ffmpeg/
+*.log
+# Large source/output videos stay local (sample_demo.mp4 is kept for CI smoke tests)
+*.mp4
+*.mov
+*.mkv
+!sample_demo.mp4

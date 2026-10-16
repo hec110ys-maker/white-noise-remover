@@ -1,0 +1,19 @@
+# White Noise Remover Dependencies
+# Python 3.11 recommended
+
+# Core numerical & audio processing
+numpy>=1.24.0,<2.0.0
+scipy>=1.11.0
+soundfile>=0.12.1
+
+# GUI Framework
+PySide6>=6.6.0
+
+# Visualization & Reporting
+matplotlib>=3.8.0
+
+# VAD (Voice Activity Detection)
+silero-vad>=5.1.0
+
+# Testing
+pytest>=7.4.0

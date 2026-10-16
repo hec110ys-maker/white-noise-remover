@@ -1,0 +1,86 @@
+# 유튜브 동영상 화이트 노이즈 제거 프로그램
+
+로컬 PC에서 동영상 파일(MP4, MOV, MKV)의 **화질은 100% 무손실 복사(`-c:v copy`)**하고, 오디오의 지속적인 화이트 노이즈(마이크 배경 잡음)만 인공지능 딥러닝(DeepFilterNet)으로 깨끗하게 제거하는 데스크톱 프로그램입니다.
+
+---
+
+## 💾 Windows PC에 설치하기 (Python 설치 불필요)
+
+1. GitHub 저장소의 **Releases**에서 `WhiteNoiseRemover-Setup-x.y.z.exe`를 내려받습니다.
+2. 더블클릭해서 설치합니다. 관리자 권한은 필요 없습니다.
+   - "Windows의 PC 보호" 창이 뜨면 **추가 정보 → 실행**을 누릅니다(코드 서명이 없는 프로그램이라 뜨는 경고입니다).
+3. 시작 메뉴나 바탕화면의 **화이트 노이즈 제거 프로그램**을 실행합니다.
+
+설치 없이 쓰려면 `WhiteNoiseRemover-Portable-x.y.z.zip`을 풀고 `WhiteNoiseRemover.exe`를 실행하면 됩니다.
+FFmpeg와 AI 모델(DeepFilterNet3, RNNoise)이 함께 들어 있어서 인터넷 연결 없이 동작합니다.
+오류가 나면 `%LOCALAPPDATA%\WhiteNoiseRemover\crash.log`를 확인하세요.
+
+### 새 버전 배포하기 (개발자용)
+`v1.0.0` 같은 태그를 push하면 GitHub Actions(`.github/workflows/build-windows.yml`)가 Windows에서 exe를 빌드하고,
+3개 엔진을 샘플 영상으로 테스트한 다음 Releases에 설치파일을 올립니다.
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+---
+
+## 🚀 소스에서 실행하기 (개발용)
+
+### 1. 프로그램 창(GUI) 띄우기 (추천)
+- **Mac**: 폴더 안의 **`실행하기.command`** 파일을 더블클릭합니다.
+  (또는 터미널에서 `./.venv/bin/python main.py`)
+- **Windows**: 폴더 안의 **`실행하기.bat`** 파일을 더블클릭합니다.
+  (또는 터미널에서 `python main.py`)
+
+### 2. 터미널 명령어로 바로 실행하기 (CLI)
+화면을 띄우지 않고 터미널에서 즉시 변환하려면:
+```bash
+# 1순위: DeepFilterNet3 (AI 음성 향상, 기본값)
+./.venv/bin/python run_cli.py "동영상파일명.mp4"
+
+# 2순위: noisereduce (스펙트럴 게이팅 초고속)
+./.venv/bin/python run_cli.py "동영상파일명.mp4" -e spectral
+
+# 3순위: RNNoise (경량 순환신경망 RNN)
+./.venv/bin/python run_cli.py "동영상파일명.mp4" -e rnnoise
+```
+
+---
+
+## 🎛️ 지원 노이즈 제거 엔진 3종 비교
+
+| 순위 | 엔진명 | 핵심 기술 | 특징 및 추천 상황 |
+| :---: | :--- | :--- | :--- |
+| **1순위** | **DeepFilterNet3** | 딥러닝 AI 모델 | 음성 보존력과 잡음 제거의 최적 밸런스 (기본 추천) |
+| **2순위** | **noisereduce** | 스펙트럴 게이팅 | 정적 화이트 노이즈(Hiss)를 완벽한 정적으로 날려버리는 강력함 |
+| **3순위** | **RNNoise** | 경량 순환신경망 (RNN) | 초경량 CPU 작동 (실시간 대비 150배 속도), 안정적인 마이크 잡음 억제 |
+
+---
+
+## 📋 핵심 파일 안내
+
+| 파일명 | 설명 |
+| :--- | :--- |
+| **`main.py`** | **프로그램의 메인 진입점** (GUI 실행 및 단독 실행) |
+| **`run_cli.py`** | 터미널 전용 CLI 실행기 |
+| **`실행하기.command`** | Mac에서 더블클릭으로 바로 켜는 실행 파일 |
+| **`실행하기.bat`** | Windows에서 더블클릭으로 바로 켜는 실행 파일 |
+| `config.py` | 샘플레이트(48kHz), 청크 길이(30s), 코덱 등 기본 설정값 |
+| `core/` | 메타데이터 분석, 오디오 추출, 청크 분할, 노이즈 제거 엔진 3종 |
+| `gui/` | 드래그 앤 드롭, 슬라이더, 미리듣기 창, 스펙트로그램 화면 |
+
+---
+
+## 📜 오픈소스 및 모델 라이선스 (상업적 이용 가능)
+
+유튜브 수익 창출 채널에 안심하고 사용할 수 있도록 **상업적 이용이 허용된 오픈소스만 사용**합니다.
+
+| 모듈 / 모델 | 라이선스 | 유튜브 상업적 이용 |
+| :--- | :--- | :---: |
+| **DeepFilterNet3** | MIT / Apache-2.0 | **완전 허용** |
+| **noisereduce** | MIT | **완전 허용** |
+| **RNNoise** | 3-Clause BSD | **완전 허용** |
+| **Silero VAD** | MIT | **완전 허용** |
+| **PySide6** | LGPLv3 | **완전 허용** |
+| **FFmpeg** | LGPL / GPL (독립 프로세스) | **완전 허용** |
+| *(비교) Meta Denoiser* | *CC-BY-NC 4.0 (비상업용 전용)* | *❌ 본 프로그램에서 완전 배제* |

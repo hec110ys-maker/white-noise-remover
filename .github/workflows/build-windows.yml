@@ -1,0 +1,90 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies (CPU-only PyTorch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
+          pip install -r packaging/requirements-windows.txt
+
+      - name: Download FFmpeg (LGPL build)
+        shell: pwsh
+        run: |
+          Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip" -OutFile ffmpeg.zip
+          Expand-Archive ffmpeg.zip -DestinationPath ffmpeg_tmp
+          New-Item -ItemType Directory -Force packaging/ffmpeg | Out-Null
+          Get-ChildItem ffmpeg_tmp -Recurse -Include ffmpeg.exe,ffprobe.exe | Copy-Item -Destination packaging/ffmpeg
+          packaging/ffmpeg/ffmpeg.exe -hide_banner -version | Select-Object -First 1
+
+      - name: Unit tests
+        shell: pwsh
+        run: |
+          $env:PATH = "$PWD\packaging\ffmpeg;$env:PATH"
+          python -m pytest -q
+
+      - name: Build exe (PyInstaller)
+        run: pyinstaller --noconfirm packaging/WhiteNoiseRemover.spec
+
+      - name: Smoke test packaged exe (all 3 engines)
+        shell: pwsh
+        run: |
+          $exe = "dist\WhiteNoiseRemover\WhiteNoiseRemover.exe"
+          foreach ($engine in "rnnoise", "spectral", "deepfilter") {
+            $out = "$PWD\smoke_$engine.mp4"
+            $p = Start-Process $exe -ArgumentList "`"$PWD\sample_demo.mp4`"", "-e", $engine, "-o", "`"$out`"" -Wait -PassThru
+            Get-Content "$env:LOCALAPPDATA\WhiteNoiseRemover\app.log" -ErrorAction SilentlyContinue
+            if ($p.ExitCode -ne 0 -or -not (Test-Path $out)) { throw "Engine $engine failed (exit $($p.ExitCode))" }
+            Write-Host "OK: $engine -> $((Get-Item $out).Length) bytes"
+          }
+
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "0.0.${{ github.run_number }}" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+            $env:PATH = "${env:ProgramFiles(x86)}\Inno Setup 6;$env:PATH"
+          }
+          iscc /DAppVersion=${{ steps.ver.outputs.version }} packaging\installer.iss
+          Compress-Archive dist\WhiteNoiseRemover\* "dist\WhiteNoiseRemover-Portable-${{ steps.ver.outputs.version }}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WhiteNoiseRemover-Windows-${{ steps.ver.outputs.version }}
+          path: dist/WhiteNoiseRemover-Setup-*.exe
+
+      - name: Publish GitHub Release (tags only)
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/WhiteNoiseRemover-Setup-*.exe
+            dist/WhiteNoiseRemover-Portable-*.zip
