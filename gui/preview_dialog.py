@@ -40,7 +40,7 @@ class PreviewDialog(QDialog):
         self.setWindowTitle("🎧 30초 구간 미리듣기 (A/B 비교 청취)")
         self.resize(550, 420)
         self.setStyleSheet("""
-            QDialog { background-color: #1e1e2e; color: #cdd6f4; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto; }
+            QDialog { background-color: #1e1e2e; color: #cdd6f4; font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", "Segoe UI", Roboto; }
             QLabel { color: #cdd6f4; }
             QGroupBox { border: 1px solid #45475a; border-radius: 8px; margin-top: 15px; padding-top: 15px; font-weight: bold; color: #89b4fa; }
             QPushButton { background-color: #313244; color: #cdd6f4; border: 1px solid #45475a; border-radius: 6px; padding: 8px 16px; font-size: 13px; font-weight: bold; }

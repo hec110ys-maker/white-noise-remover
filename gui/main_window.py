@@ -67,7 +67,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("유튜브 동영상 화이트 노이즈 제거 프로그램 v1.0")
-        self.resize(780, 850)
+        self._fit_to_screen(780, 850)
         self.current_video_path: Optional[Path] = None
         self.current_meta: Optional[MediaMetadata] = None
         self.worker: Optional[DenoiseWorker] = None
@@ -76,10 +76,23 @@ class MainWindow(QMainWindow):
         self.apply_theme()
         self.init_ui()
 
+    def _fit_to_screen(self, width: int, height: int):
+        """Laptops at 125-150% Windows scaling have ~700 logical px of height; never open larger than the screen."""
+        from PySide6.QtGui import QGuiApplication
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            self.resize(width, height)
+            return
+        avail = screen.availableGeometry()
+        w = min(width, int(avail.width() * 0.95))
+        h = min(height, int(avail.height() * 0.92))
+        self.resize(w, h)
+        self.move(avail.x() + (avail.width() - w) // 2, avail.y() + (avail.height() - h) // 2)
+
     def apply_theme(self):
         self.setStyleSheet("""
             QMainWindow { background-color: #11111b; }
-            QWidget { color: #cdd6f4; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Malgun Gothic", sans-serif; }
+            QWidget { color: #cdd6f4; font-family: -apple-system, BlinkMacSystemFont, "Malgun Gothic", "Segoe UI", Roboto, sans-serif; }
             QGroupBox {
                 border: 1px solid #313244;
                 border-radius: 10px;
@@ -136,8 +149,16 @@ class MainWindow(QMainWindow):
         """)
 
     def init_ui(self):
+        # Content scrolls instead of being squeezed when the window is shorter than the layout
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea, QScrollArea > QWidget > QWidget { background-color: #11111b; }")
+        self.scroll_area = scroll
         central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        scroll.setWidget(central_widget)
+        self.setCentralWidget(scroll)
         main_layout = QVBoxLayout(central_widget)
         main_layout.setContentsMargins(20, 20, 20, 20)
         main_layout.setSpacing(15)
@@ -225,7 +246,7 @@ class MainWindow(QMainWindow):
         settings_layout.addLayout(vp_layout)
 
         # Studio Clean Mode CheckBox
-        self.chk_studio = QCheckBox("✨ 스튜디오 무잡음 모드 (미세 잔류 Hiss & 75Hz 럼블 100% 완전 제거)")
+        self.chk_studio = QCheckBox("✨ 스튜디오 무잡음 모드 (미세 잔류 Hiss && 75Hz 럼블 100% 완전 제거)")
         self.chk_studio.setChecked(True)
         self.chk_studio.setToolTip("말소리 사이의 쉼(Pause) 구간 잔류 화이트 노이즈와 마이크 저주파 웅~ 소리를 스튜디오 방송급으로 정밀 차단합니다.")
         self.chk_studio.setStyleSheet("""
@@ -276,7 +297,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.status_lbl)
 
         # 7. QA Results Section
-        self.results_group = QGroupBox("품질 검증 리포트 & 스펙트로그램")
+        self.results_group = QGroupBox("품질 검증 리포트 && 스펙트로그램")
         self.results_group.setVisible(False)
         results_layout = QVBoxLayout(self.results_group)
 
@@ -428,7 +449,9 @@ class MainWindow(QMainWindow):
         spec_path = result.get("spectrogram_image")
         if spec_path and Path(spec_path).exists():
             pix = QPixmap(spec_path)
-            self.spec_img_lbl.setPixmap(pix.scaledToWidth(720, Qt.SmoothTransformation))
+            # Fit the image to the visible width so it never widens the window
+            target_w = max(300, min(720, self.scroll_area.viewport().width() - 70))
+            self.spec_img_lbl.setPixmap(pix.scaledToWidth(target_w, Qt.SmoothTransformation))
 
         self.results_group.setVisible(True)
         QMessageBox.information(self, "완료", f"화이트 노이즈 제거가 성공적으로 완료되었습니다!\n\n저장 위치: {result['output_path']}")
