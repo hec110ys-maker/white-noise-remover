@@ -42,6 +42,14 @@ jobs:
           $env:PATH = "$PWD\packaging\ffmpeg;$env:PATH"
           python -m pytest -q --ignore=tests/test_deepfilter.py
 
+      - name: Version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "0.0.${{ github.run_number }}" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Set-Content utils/version.py "__version__ = `"$v`""
+
       - name: Build exe (PyInstaller)
         run: pyinstaller --noconfirm packaging/WhiteNoiseRemover.spec
 
@@ -56,13 +64,6 @@ jobs:
             if ($p.ExitCode -ne 0 -or -not (Test-Path $out)) { throw "Engine $engine failed (exit $($p.ExitCode))" }
             Write-Host "OK: $engine -> $((Get-Item $out).Length) bytes"
           }
-
-      - name: Version
-        id: ver
-        shell: pwsh
-        run: |
-          $v = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}".TrimStart("v") } else { "0.0.${{ github.run_number }}" }
-          "version=$v" >> $env:GITHUB_OUTPUT
 
       - name: Build installer (Inno Setup)
         shell: pwsh

@@ -9,10 +9,12 @@ from typing import Optional
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QComboBox, QSlider, QProgressBar, QMessageBox, QGroupBox,
-    QFrame, QScrollArea, QCheckBox
+    QFrame, QScrollArea, QCheckBox, QListWidget, QListWidgetItem
 )
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QDesktopServices
+from PySide6.QtCore import Qt, QUrl, QSettings
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QPixmap, QDesktopServices, QIcon
+from utils.paths import app_base_dir
+from utils.version import __version__
 
 from utils.device import get_optimal_device
 from core.denoise import deepfilter_available
@@ -22,11 +24,18 @@ from gui.worker import DenoiseWorker
 from gui.preview_dialog import PreviewDialog
 
 
+VIDEO_EXTENSIONS = (".mp4", ".mov", ".mkv")
+
+
+def _is_video(path: str) -> bool:
+    return path.lower().endswith(VIDEO_EXTENSIONS)
+
+
 class DragDropArea(QFrame):
     """Visual drag & drop landing card."""
-    def __init__(self, on_file_selected, parent=None):
+    def __init__(self, on_files_selected, parent=None):
         super().__init__(parent)
-        self.on_file_selected = on_file_selected
+        self.on_files_selected = on_files_selected
         self.setAcceptDrops(True)
         self.setObjectName("dropArea")
         self.setStyleSheet("""
@@ -44,7 +53,7 @@ class DragDropArea(QFrame):
 
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignCenter)
-        self.label = QLabel("📥 여기에 동영상 파일을 드래그 앤 드롭하세요\n(MP4, MOV, MKV 지원)")
+        self.label = QLabel("📥 여기에 동영상 파일을 드래그 앤 드롭하세요\n(여러 개 가능 · MP4, MOV, MKV 지원)")
         self.label.setAlignment(Qt.AlignCenter)
         self.label.setStyleSheet("color: #cdd6f4; font-size: 14px; font-weight: bold;")
         layout.addWidget(self.label)
@@ -52,29 +61,35 @@ class DragDropArea(QFrame):
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
             urls = event.mimeData().urls()
-            if urls and any(urls[0].toLocalFile().lower().endswith(ext) for ext in (".mp4", ".mov", ".mkv")):
+            if any(_is_video(u.toLocalFile()) for u in urls):
                 event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent):
-        for url in event.mimeData().urls():
-            file_path = url.toLocalFile()
-            if any(file_path.lower().endswith(ext) for ext in (".mp4", ".mov", ".mkv")):
-                self.on_file_selected(file_path)
-                break
+        files = [u.toLocalFile() for u in event.mimeData().urls() if _is_video(u.toLocalFile())]
+        if files:
+            self.on_files_selected(files)
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("유튜브 동영상 화이트 노이즈 제거 프로그램 v1.0")
+        self.setWindowTitle(f"동영상 화이트 노이즈 제거 프로그램 v{__version__}")
+        icon_path = app_base_dir() / "assets" / "icon.png"
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
+        self.settings = QSettings("WhiteNoiseRemover", "WhiteNoiseRemover")
         self._fit_to_screen(780, 850)
         self.current_video_path: Optional[Path] = None
+        self.queue: list[Path] = []          # files waiting / done in this batch
+        self.batch_index = -1                # index of the file being processed, -1 when idle
+        self.batch_results: list[tuple[Path, Optional[str]]] = []  # (file, error or None)
         self.current_meta: Optional[MediaMetadata] = None
         self.worker: Optional[DenoiseWorker] = None
         self.last_result: Optional[dict] = None
 
         self.apply_theme()
         self.init_ui()
+        self.load_settings()
 
     def _fit_to_screen(self, width: int, height: int):
         """Laptops at 125-150% Windows scaling have ~700 logical px of height; never open larger than the screen."""
@@ -185,7 +200,7 @@ class MainWindow(QMainWindow):
         main_layout.addLayout(header_layout)
 
         # 2. Drag & Drop Area
-        self.drop_area = DragDropArea(self.load_video_file)
+        self.drop_area = DragDropArea(self.add_files)
         main_layout.addWidget(self.drop_area)
 
         # File Select Button Row
@@ -197,7 +212,23 @@ class MainWindow(QMainWindow):
         btn_browse = QPushButton("📁 파일 찾아보기...")
         btn_browse.clicked.connect(self.browse_file)
         file_row.addWidget(btn_browse)
+        self.btn_clear = QPushButton("🗑️ 목록 비우기")
+        self.btn_clear.clicked.connect(self.clear_queue)
+        self.btn_clear.setVisible(False)
+        file_row.addWidget(self.btn_clear)
         main_layout.addLayout(file_row)
+
+        # Batch file list (shown once a file is added); clicking a row shows its info / preview
+        self.file_list = QListWidget()
+        self.file_list.setVisible(False)
+        self.file_list.setMaximumHeight(130)
+        self.file_list.setStyleSheet(
+            "QListWidget { background-color: #181825; border: 1px solid #45475a; border-radius: 6px; font-size: 12px; }"
+            "QListWidget::item { padding: 3px 6px; }"
+            "QListWidget::item:selected { background-color: #313244; color: #cdd6f4; }"
+        )
+        self.file_list.currentRowChanged.connect(self.on_file_row_changed)
+        main_layout.addWidget(self.file_list)
 
         # 3. Video Metadata Info Card
         self.meta_group = QGroupBox("영상 정보")
@@ -322,14 +353,103 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.results_group)
 
     def browse_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(
+        file_paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "동영상 파일 선택",
-            "",
+            "동영상 파일 선택 (여러 개 선택 가능)",
+            self.settings.value("last_dir", "", type=str),
             "Video Files (*.mp4 *.mov *.mkv);;All Files (*)"
         )
-        if file_path:
-            self.load_video_file(file_path)
+        if file_paths:
+            self.settings.setValue("last_dir", str(Path(file_paths[0]).parent))
+            self.add_files(file_paths)
+
+    # ---- Remembered settings (registry on Windows, plist on Mac) -------
+    def load_settings(self):
+        st = self.settings
+        idx = self.combo_engine.findData(st.value("engine", "", type=str))
+        if idx >= 0:
+            self.combo_engine.setCurrentIndex(idx)
+        self.slider_strength.setValue(st.value("strength", 100, type=int))
+        self.slider_vp.setValue(st.value("voice_protection", 30, type=int))
+        self.chk_studio.setChecked(st.value("studio_cleanup", True, type=bool))
+
+    def save_settings(self):
+        st = self.settings
+        st.setValue("engine", self.combo_engine.currentData())
+        st.setValue("strength", self.slider_strength.value())
+        st.setValue("voice_protection", self.slider_vp.value())
+        st.setValue("studio_cleanup", self.chk_studio.isChecked())
+
+    def closeEvent(self, event):
+        if self.batch_index >= 0:
+            ans = QMessageBox.question(self, "작업 중", "노이즈 제거가 진행 중입니다. 취소하고 종료할까요?")
+            if ans != QMessageBox.Yes:
+                event.ignore()
+                return
+            if self.worker:
+                self.worker.cancel()
+                self.worker.wait(10000)
+        self.save_settings()
+        super().closeEvent(event)
+
+    # ---- Batch queue -------------------------------------------------
+    STATUS_ICONS = {"wait": "⏳ 대기", "run": "▶️ 처리 중", "done": "✅ 완료", "fail": "❌ 실패", "skip": "⏭️ 건너뜀"}
+
+    def add_files(self, file_paths):
+        if self.batch_index >= 0:
+            QMessageBox.information(self, "처리 중", "현재 작업이 끝난 뒤에 파일을 추가해 주세요.")
+            return
+        added = 0
+        for fp in file_paths:
+            p = Path(fp).resolve()
+            if p.exists() and p not in self.queue and not p.stem.endswith("_denoised"):
+                self.queue.append(p)
+                item = QListWidgetItem()
+                item.setData(Qt.UserRole, "wait")
+                self.file_list.addItem(item)
+                self._render_row(len(self.queue) - 1)
+                added += 1
+        if not added:
+            return
+        self.file_list.setVisible(True)
+        self.btn_clear.setVisible(True)
+        self.file_list.setCurrentRow(len(self.queue) - added)
+        self._update_queue_label()
+
+    def clear_queue(self):
+        if self.batch_index >= 0:
+            return
+        self.queue.clear()
+        self.file_list.clear()
+        self.file_list.setVisible(False)
+        self.btn_clear.setVisible(False)
+        self.current_video_path = None
+        self.current_meta = None
+        self.file_path_lbl.setText("선택된 파일 없음")
+        self.drop_area.label.setText("📥 여기에 동영상 파일을 드래그 앤 드롭하세요\n(여러 개 가능 · MP4, MOV, MKV 지원)")
+        self.meta_lbl.setText("동영상 파일을 선택하면 해상도, 길이, 오디오 정보가 표시됩니다.")
+        self.btn_start.setEnabled(False)
+        self.btn_preview.setEnabled(False)
+        self.status_lbl.setText("대기 중")
+
+    def _render_row(self, row: int):
+        item = self.file_list.item(row)
+        status = item.data(Qt.UserRole)
+        item.setText(f"{self.STATUS_ICONS[status]}   {self.queue[row].name}")
+
+    def _set_row_status(self, row: int, status: str):
+        self.file_list.item(row).setData(Qt.UserRole, status)
+        self._render_row(row)
+
+    def _update_queue_label(self):
+        n = len(self.queue)
+        self.file_path_lbl.setText(f"<b>파일 {n}개</b> 선택됨" if n > 1 else f"<b>선택된 파일:</b> {self.queue[0].name}")
+        self.drop_area.label.setText(f"✅ 파일 {n}개 준비됨\n(드롭하면 목록에 추가됩니다)")
+        self.btn_start.setText("🚀 노이즈 제거 시작" if n == 1 else f"🚀 {n}개 파일 노이즈 제거 시작")
+
+    def on_file_row_changed(self, row: int):
+        if 0 <= row < len(self.queue):
+            self.load_video_file(str(self.queue[row]))
 
     def load_video_file(self, file_path: str):
         p = Path(file_path).resolve()
@@ -337,8 +457,6 @@ class MainWindow(QMainWindow):
             return
 
         self.current_video_path = p
-        self.file_path_lbl.setText(f"<b>선택된 파일:</b> {p.name}")
-        self.drop_area.label.setText(f"✅ {p.name}\n(새 파일을 드롭하여 변경)")
 
         try:
             self.current_meta = probe_media(p)
@@ -352,9 +470,10 @@ class MainWindow(QMainWindow):
                 f"오디오: <b>{self.current_meta.audio_sample_rate}Hz {self.current_meta.audio_channels}ch</b>"
             )
             self.meta_lbl.setText(info_text)
-            self.btn_start.setEnabled(True)
-            self.btn_preview.setEnabled(True)
-            self.status_lbl.setText("준비 완료! [노이즈 제거 시작] 또는 [30초 미리듣기]를 클릭하세요.")
+            if self.batch_index < 0:
+                self.btn_start.setEnabled(True)
+                self.btn_preview.setEnabled(True)
+                self.status_lbl.setText("준비 완료! [노이즈 제거 시작] 또는 [30초 미리듣기]를 클릭하세요.")
         except Exception as e:
             QMessageBox.critical(self, "파일 읽기 오류", f"메타데이터 분석 실패: {e}")
 
@@ -377,34 +496,108 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def start_denoising(self):
-        if not self.current_video_path:
+        if not self.queue:
             return
 
-        out_path = get_output_video_path(self.current_video_path)
-        eng = self.combo_engine.currentData()
-        str_val = self.slider_strength.value() / 100.0
-        vp_val = self.slider_vp.value() / 100.0
-        studio_clean = self.chk_studio.isChecked()
+        existing = [p for p in self.queue if get_output_video_path(p).exists()]
+        self.overwrite_existing = True
+        if existing:
+            names = "\n".join(f"• {get_output_video_path(p).name}" for p in existing[:5])
+            more = f"\n…외 {len(existing) - 5}개" if len(existing) > 5 else ""
+            ans = QMessageBox.question(
+                self, "이미 처리된 파일",
+                f"결과 파일이 이미 있습니다:\n{names}{more}\n\n덮어쓸까요? (아니요: 이 파일들은 건너뜀)",
+                QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+            )
+            if ans == QMessageBox.Cancel:
+                return
+            self.overwrite_existing = ans == QMessageBox.Yes
 
+        self.batch_results = []
+        for row in range(len(self.queue)):
+            self._set_row_status(row, "wait")
         self.btn_start.setEnabled(False)
         self.btn_preview.setEnabled(False)
+        self.btn_clear.setEnabled(False)
         self.btn_cancel.setEnabled(True)
-        self.progress_bar.setValue(0)
         self.results_group.setVisible(False)
+        self.batch_index = -1
+        self._start_next_in_batch()
+
+    def _start_next_in_batch(self):
+        self.batch_index += 1
+        while self.batch_index < len(self.queue):
+            path = self.queue[self.batch_index]
+            if self.overwrite_existing or not get_output_video_path(path).exists():
+                break
+            self._set_row_status(self.batch_index, "skip")
+            self.batch_index += 1
+        if self.batch_index >= len(self.queue):
+            self._finish_batch()
+            return
+
+        row = self.batch_index
+        path = self.queue[row]
+        self._set_row_status(row, "run")
+        self.file_list.setCurrentRow(row)
+        self.progress_bar.setValue(0)
 
         self.worker = DenoiseWorker(
-            input_video_path=self.current_video_path,
-            output_video_path=out_path,
-            engine_type=eng,
-            strength=str_val,
-            voice_protection=vp_val,
-            enable_studio_cleanup=studio_clean
+            input_video_path=path,
+            output_video_path=get_output_video_path(path),
+            engine_type=self.combo_engine.currentData(),
+            strength=self.slider_strength.value() / 100.0,
+            voice_protection=self.slider_vp.value() / 100.0,
+            enable_studio_cleanup=self.chk_studio.isChecked()
         )
         self.worker.progress_changed.connect(self.on_worker_progress)
         self.worker.status_changed.connect(self.on_worker_status)
         self.worker.finished_success.connect(self.on_worker_finished)
         self.worker.error_occurred.connect(self.on_worker_error)
+        self.worker.finished.connect(self.on_worker_thread_done)
         self.worker.start()
+
+    def on_worker_thread_done(self):
+        """Runs after every job (success, error or cancel) once the thread has fully stopped."""
+        if self.batch_index < 0:
+            return
+        if self.worker and self.worker._is_cancelled:
+            for row in range(self.batch_index, len(self.queue)):
+                if self.file_list.item(row).data(Qt.UserRole) in ("wait", "run"):
+                    self._set_row_status(row, "skip")
+            self.batch_index = len(self.queue)
+            self._finish_batch(cancelled=True)
+            return
+        self._start_next_in_batch()
+
+    def _batch_prefix(self) -> str:
+        if len(self.queue) > 1 and self.batch_index >= 0:
+            return f"[{self.batch_index + 1}/{len(self.queue)}] "
+        return ""
+
+    def _finish_batch(self, cancelled: bool = False):
+        self.batch_index = -1
+        self.btn_start.setEnabled(bool(self.queue))
+        self.btn_preview.setEnabled(self.current_video_path is not None)
+        self.btn_clear.setEnabled(True)
+        self.btn_cancel.setEnabled(False)
+
+        ok = [p for p, err in self.batch_results if err is None]
+        failed = [(p, err) for p, err in self.batch_results if err is not None]
+        if cancelled:
+            self.status_lbl.setText("⏹️ 작업이 취소되었습니다.")
+            return
+        if not self.batch_results:
+            self.status_lbl.setText("처리할 파일이 없습니다 (모두 건너뜀).")
+            return
+        self.status_lbl.setText(f"✅ 완료 {len(ok)}개" + (f" · ❌ 실패 {len(failed)}개" if failed else ""))
+        if failed:
+            details = "\n\n".join(f"• {p.name}\n  {err.splitlines()[0] if err else ''}" for p, err in failed)
+            QMessageBox.warning(self, "일부 파일 실패", f"성공 {len(ok)}개, 실패 {len(failed)}개\n\n{details}")
+        elif len(ok) == 1:
+            QMessageBox.information(self, "완료", f"화이트 노이즈 제거가 성공적으로 완료되었습니다!\n\n저장 위치: {get_output_video_path(ok[0])}")
+        else:
+            QMessageBox.information(self, "완료", f"{len(ok)}개 파일의 화이트 노이즈 제거가 모두 끝났습니다.\n\n결과는 각 원본 영상과 같은 폴더에 '_denoised.mp4'로 저장되었습니다.")
 
     def cancel_processing(self):
         if self.worker and self.worker.isRunning():
@@ -419,24 +612,23 @@ class MainWindow(QMainWindow):
         eta = info["eta_sec"]
         rtf = info["rtf"]
         self.progress_bar.setValue(pct)
-        self.status_lbl.setText(f"진행 중: {pct}% (청크 {chunk}/{total}) | 남은 예상 시간: {eta:.1f}초 | 처리 속도: {rtf:.3f}x")
+        self.status_lbl.setText(f"{self._batch_prefix()}진행 중: {pct}% (청크 {chunk}/{total}) | 남은 예상 시간: {eta:.1f}초 | 처리 속도: {rtf:.3f}x")
 
     def on_worker_status(self, msg: str):
-        self.status_lbl.setText(msg)
+        self.status_lbl.setText(self._batch_prefix() + msg)
 
     def on_worker_finished(self, result: dict):
         self.last_result = result
         self.progress_bar.setValue(100)
-        self.btn_start.setEnabled(True)
-        self.btn_preview.setEnabled(True)
-        self.btn_cancel.setEnabled(False)
+        self._set_row_status(self.batch_index, "done")
+        self.batch_results.append((self.queue[self.batch_index], None))
 
         comp = result["meta_comparison"]
         qa = result["qa_metrics"]
         elapsed = result["elapsed_sec"]
 
         report_text = (
-            f"🎉 <b>노이즈 제거 완료!</b> (소요 시간: {elapsed:.1f}초)<br>"
+            f"🎉 <b>노이즈 제거 완료!</b> {self._batch_prefix()}(소요 시간: {elapsed:.1f}초)<br>"
             f"• 출력 파일: <b>{Path(result['output_path']).name}</b><br>"
             f"• 영상 화질 보존: <b>{'✅ 100% 무손실 복사 일치' if comp['is_resolution_match'] else '⚠️ 해상도 불일치'}</b> "
             f"({comp['orig_resolution']} @ {comp['orig_fps']}fps)<br>"
@@ -454,14 +646,12 @@ class MainWindow(QMainWindow):
             self.spec_img_lbl.setPixmap(pix.scaledToWidth(target_w, Qt.SmoothTransformation))
 
         self.results_group.setVisible(True)
-        QMessageBox.information(self, "완료", f"화이트 노이즈 제거가 성공적으로 완료되었습니다!\n\n저장 위치: {result['output_path']}")
 
     def on_worker_error(self, err: str):
-        self.btn_start.setEnabled(True)
-        self.btn_preview.setEnabled(True)
-        self.btn_cancel.setEnabled(False)
-        self.status_lbl.setText("❌ 처리 중 오류 발생")
-        QMessageBox.critical(self, "처리 오류", f"작업 중 오류가 발생했습니다:\n{err}")
+        # Record and keep going; the summary at the end lists every failure
+        self._set_row_status(self.batch_index, "fail")
+        self.batch_results.append((self.queue[self.batch_index], err))
+        print(f"[batch] {self.queue[self.batch_index]} failed: {err}")
 
     def open_result_file(self):
         if self.last_result:

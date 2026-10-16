@@ -9,7 +9,7 @@ ROOT = Path(SPECPATH).parent
 FFMPEG_DIR = ROOT / "packaging" / "ffmpeg"
 exe_suffix = ".exe" if sys.platform == "win32" else ""
 
-datas = [(str(ROOT / "models" / "bd.rnnn"), "models")]
+datas = [(str(ROOT / "models" / "bd.rnnn"), "models"), (str(ROOT / "assets" / "icon.png"), "assets")]
 binaries = []
 for tool in ("ffmpeg", "ffprobe"):
     f = FFMPEG_DIR / f"{tool}{exe_suffix}"
@@ -47,6 +47,7 @@ exe = EXE(
     exclude_binaries=True,
     name="WhiteNoiseRemover",
     console=False,  # GUI app: no black console window
+    icon=str(ROOT / "assets" / "icon.ico"),
     upx=False,
 )
 

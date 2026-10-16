@@ -12,7 +12,10 @@ from core.denoise.spectral import SpectralGatingDenoiser
 from core.denoise.rnnoise import RNNoiseDenoiser
 from core.vad import extract_noise_sample_from_file
 from core.qa import generate_spectrogram_image, analyze_audio_quality
-from utils.paths import get_output_video_path, get_temp_work_dir, cleanup_temp_dir
+import shutil
+from utils.paths import (
+    get_output_video_path, get_temp_work_dir, cleanup_temp_dir, estimate_work_bytes, user_data_dir
+)
 
 
 class DenoiseWorker(QThread):
@@ -48,7 +51,8 @@ class DenoiseWorker(QThread):
         self._is_cancelled = True
 
     def run(self):
-        temp_dir = get_temp_work_dir(self.input_video_path)
+        temp_dir = None
+        succeeded = False
         start_time = time.time()
 
         try:
@@ -57,6 +61,19 @@ class DenoiseWorker(QThread):
             if not meta_orig.has_audio:
                 self.error_occurred.emit("입력 영상에 오디오 스트림이 없습니다.")
                 return
+
+            # Check disk space up front instead of failing halfway through a long video
+            temp_dir = get_temp_work_dir(
+                self.input_video_path,
+                needed_bytes=estimate_work_bytes(meta_orig.duration_sec, meta_orig.audio_channels),
+            )
+            out_dir = self.output_video_path.parent
+            out_needed = int(self.input_video_path.stat().st_size * 1.1)
+            if shutil.disk_usage(out_dir).free < out_needed:
+                raise RuntimeError(
+                    f"결과 영상을 저장할 공간이 부족합니다 ({out_dir}).\n"
+                    f"약 {out_needed / 1024 ** 3:.1f}GB가 필요합니다."
+                )
 
             if self._is_cancelled:
                 return
@@ -133,7 +150,9 @@ class DenoiseWorker(QThread):
 
             # Step 5: Spectrogram & QA Analysis
             self.status_changed.emit("📊 품질 분석 및 스펙트로그램 시각화 생성 중...")
-            spec_img = temp_dir / "spectrogram_comparison.png"
+            # Keep the image outside the temp folder, which is deleted when this job finishes
+            spec_img = user_data_dir() / "spectrograms" / f"{self.input_video_path.stem}.png"
+            spec_img.parent.mkdir(parents=True, exist_ok=True)
             generate_spectrogram_image(extracted_wav, denoised_wav, spec_img, duration_limit_sec=30.0)
 
             meta_denoised = probe_media(self.output_video_path)
@@ -149,6 +168,7 @@ class DenoiseWorker(QThread):
                 "meta_comparison": meta_comp,
                 "qa_metrics": qa_metrics
             }
+            succeeded = True
             self.finished_success.emit(result_payload)
 
         except InterruptedError:
@@ -156,5 +176,6 @@ class DenoiseWorker(QThread):
         except Exception as e:
             self.error_occurred.emit(str(e))
         finally:
-            if self._is_cancelled:
+            # Failed runs keep their files so the chunk checkpoint can resume next time
+            if temp_dir is not None and (succeeded or self._is_cancelled):
                 cleanup_temp_dir(temp_dir)

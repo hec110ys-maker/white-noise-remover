@@ -12,7 +12,7 @@ from core.probe import probe_media, compare_media_metadata
 from core.extract import extract_audio, remux_video_with_audio
 from core.chunker import AudioChunker
 from core.denoise import available_engines
-from utils.paths import get_output_video_path, get_temp_work_dir, cleanup_temp_dir
+from utils.paths import get_output_video_path, get_temp_work_dir, cleanup_temp_dir, estimate_work_bytes
 from utils.device import get_optimal_device
 
 
@@ -30,7 +30,8 @@ def run_pipeline(
         sys.exit(1)
 
     out_path = Path(output_video).resolve() if output_video else get_output_video_path(video_path)
-    temp_dir = get_temp_work_dir(video_path)
+    _meta = probe_media(video_path)
+    temp_dir = get_temp_work_dir(video_path, needed_bytes=estimate_work_bytes(_meta.duration_sec, _meta.audio_channels))
 
     device_info = get_optimal_device()
     print("=" * 60)

@@ -50,6 +50,8 @@ def main():
 
         app = QApplication(sys.argv)
         app.setApplicationName("화이트 노이즈 제거 프로그램")
+        from utils.version import __version__
+        app.setApplicationVersion(__version__)
         app.setStyle("Fusion")
 
         window = MainWindow()
